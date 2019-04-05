@@ -13,6 +13,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.wubeibei.front.command.LeftDoorCommand;
 import com.wubeibei.front.util.CrashHandler;
 import com.wubeibei.front.util.LogUtil;
+import com.wubeibei.front.util.MyTimer;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -38,14 +39,15 @@ public class MainActivity extends AppCompatActivity {
     private final static int upanddowncustmer = 9;
     private final static int welcome = 10;
 
-    private boolean AutoState = false;
+    private volatile boolean AutoState = false;
 
-    private int msec = 0;
-    private int videoindex = 0;
+    private volatile int msec = 0;
+    private volatile int videoindex = 0;
     private VideoView videoView;
     private circulPlay circulPlay = new circulPlay();
-    private sequencePlay sequencePlay;
+    private sequencePlay sequencePlay = new sequencePlay();
 
+    private MyTimer myTimer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,9 +57,7 @@ public class MainActivity extends AppCompatActivity {
         init();
         hideBottomUIMenu();
         videoView = findViewById(R.id.videoview);
-        sequencePlay = new sequencePlay();
         videoView.setVideoURI(list.get(welcome));
-        videoView.start();
         videoView.setOnCompletionListener(new circulPlay());
         new Thread(new Runnable() {
             @Override
@@ -65,6 +65,35 @@ public class MainActivity extends AppCompatActivity {
                 UDP_receive();
             }
         }).start();
+        myTimer = new MyTimer(new Runnable() {
+            @Override
+            public void run() {
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        videoindex = 0;
+                        msec = 0;
+                        setAuto();
+                    }
+                });
+            }
+        });
+        myTimer.start();
+    }
+
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (videoView != null)
+            videoView.start();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (videoView != null)
+            videoView.pause();
     }
 
     private void init() {
@@ -126,18 +155,25 @@ public class MainActivity extends AppCompatActivity {
                     JSONObject jsonObject = JSONObject.parseObject(new String(receMsgs));
                     LogUtil.d(TAG, jsonObject.toJSONString());
                     int id = jsonObject.getIntValue("id");
-                    int data;
+                    final int data;
                     switch (id) {
                         case LeftDoorCommand.Driver_model:
                             data = jsonObject.getIntValue("data");
-                            switch (data) {
-                                case LeftDoorCommand.Auto:
-                                    setAuto();
-                                    break;
-                                case LeftDoorCommand.Remote:
-                                    setRemote();
-                                    break;
-                            }
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    switch (data) {
+                                        case LeftDoorCommand.Auto:
+                                            setAuto();
+                                            myTimer.startTimer();
+                                            break;
+                                        case LeftDoorCommand.Remote:
+                                            setRemote();
+                                            myTimer.cancelTimer();
+                                            break;
+                                    }
+                                }
+                            });
                             break;
                         case LeftDoorCommand.Left_Work_Sts:
                             showDoorState(jsonObject.getIntValue("data"));
@@ -155,32 +191,22 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void setAuto(){
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                videoView.setVideoURI(Playlist.get(videoindex % Playlist.size()));
-                videoView.setOnCompletionListener(sequencePlay);
-                videoView.seekTo(msec);
-                videoView.start();
-                Log.d(TAG, "setAuto: 开始于 ： " + videoindex + "/" + msec);
-                AutoState = true;
-            }
-        });
+    private synchronized void setAuto() {
+        videoView.setVideoURI(Playlist.get(videoindex % Playlist.size()));
+        videoView.setOnCompletionListener(sequencePlay);
+        videoView.seekTo(msec);
+        videoView.start();
+        Log.d(TAG, "setAuto: 开始于 ： " + videoindex + "/" + msec);
+        AutoState = true;
     }
 
-    private void setRemote(){
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                videoView.setVideoURI(list.get(welcome));
-                videoView.setOnCompletionListener(circulPlay);
-                msec = 0;
-                videoindex = 0;
-                videoView.start();
-                AutoState = false;
-            }
-        });
+    private synchronized void setRemote() {
+        videoView.setVideoURI(list.get(welcome));
+        videoView.setOnCompletionListener(circulPlay);
+        msec = 0;
+        videoindex = 0;
+        videoView.start();
+        AutoState = false;
     }
 
     // 显示门的状态
@@ -192,51 +218,50 @@ public class MainActivity extends AppCompatActivity {
                 switch (DoorState) {
                     // opening
                     case 1:
-                        videoView.pause();
-                        if (AutoState) {
-                            if (videoView.getCurrentPosition() == videoView.getDuration())
-                                msec = 0;
-                            else
-                                msec = videoView.getCurrentPosition();
-                        }
-                        Log.d(TAG, "run: 暂停于 ： " + videoindex + "/" + msec);
-                        videoView.setVideoURI(list.get(welcome));
-                        videoView.setOnCompletionListener(circulPlay);
-                        videoView.start();
+                        doingScene();
                         break;
                     // opened
                     case 3:
-                        if (AutoState)
-                            setAuto();
-                        else
-                            setRemote();
+                        didScene();
                         break;
                     // closing
                     case 4:
-                        videoView.pause();
-                        if (AutoState) {
-                            if (videoView.getCurrentPosition() == videoView.getDuration())
-                                msec = 0;
-                            else
-                                msec = videoView.getCurrentPosition();
-                        }
-                        Log.d(TAG, "run: 暂停于 ： " + videoindex + "/" + msec);
-                        videoView.setVideoURI(list.get(welcome));
-                        videoView.setOnCompletionListener(circulPlay);
-                        videoView.start();
+                        doingScene();
                         break;
                     // closed
                     case 0:
-                        if (AutoState)
-                            setAuto();
-                        else
-                            setRemote();
+                        didScene();
                         break;
                     default:
                         break;
                 }
             }
         });
+    }
+
+    private void didScene() {
+        if (AutoState) {
+            setAuto();
+            myTimer.startTimer();
+        } else {
+            setRemote();
+            myTimer.cancelTimer();
+        }
+    }
+
+    private void doingScene() {
+        myTimer.pauseTimer();
+        videoView.pause();
+        if (AutoState) {
+            if (videoView.getCurrentPosition() == videoView.getDuration())
+                msec = 0;
+            else
+                msec = videoView.getCurrentPosition();
+        }
+        Log.d(TAG, "run: 暂停于 ： " + videoindex + "/" + msec);
+        videoView.setVideoURI(list.get(welcome));
+        videoView.setOnCompletionListener(circulPlay);
+        videoView.start();
     }
 
     class circulPlay implements MediaPlayer.OnCompletionListener {
@@ -248,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    class sequencePlay implements MediaPlayer.OnCompletionListener{
+    class sequencePlay implements MediaPlayer.OnCompletionListener {
         @Override
         public void onCompletion(MediaPlayer mp) {
             videoindex++;
@@ -258,9 +283,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 隐藏虚拟按键，并且全屏
-     */
     protected void hideBottomUIMenu() {
         //隐藏虚拟按键，并且全屏
         if (Build.VERSION.SDK_INT > 11 && Build.VERSION.SDK_INT < 19) { // lower api
