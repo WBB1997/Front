@@ -33,7 +33,6 @@ public class MyTimer extends Thread {
             } catch (InterruptedException e) {
                 // 如果是暂停,而不是取消
                 if(isStart()) {
-                    Log.d(TAG, "run: Pause");
                     // 获取已经度过的时间
                     remainTime -= System.currentTimeMillis() - startTime;
                     Log.d(TAG, "run: 还剩余" + remainTime);
@@ -68,17 +67,17 @@ public class MyTimer extends Thread {
         this.start = start;
     }
 
-    public void cancelTimer() {
+    public synchronized void cancelTimer() {
         setStart(false);
         this.interrupt();
     }
 
-    public void pauseTimer() {
+    public synchronized void pauseTimer() {
         setPause(true);
         this.interrupt();
     }
 
-    public void startTimer() {
+    public synchronized void startTimer() {
         setPause(false);
         setStart(true);
     }
