@@ -7,7 +7,7 @@ public class MyTimer extends Thread {
     private Runnable target;
     private volatile boolean pause = false;
     private volatile boolean start = false;
-    private final static long timeDiff = 165 * 1000;
+    private final static long timeDiff = 162 * 1000;
 
     public MyTimer(Runnable target) {
         this.target = target;
